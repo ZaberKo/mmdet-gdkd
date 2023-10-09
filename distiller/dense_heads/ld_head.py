@@ -132,7 +132,7 @@ class LDHead(GFLHead):
                 weight=weight_targets[:, None].expand(-1, 4).reshape(-1),
                 avg_factor=4.0)
 
-            #TODO:
+            #TODO: fix it
             # ld loss
             loss_ld = self.loss_ld(
                 pred_corners,

@@ -11,7 +11,7 @@ model = dict(
         type='LDHead',
         loss_ld=dict(
             type='KnowledgeDistillationKDLoss', 
-            loss_weight=0.25, 
+            loss_weight=0.25, #TODO: fix it
             T=10),
         reg_max=16)
 )
