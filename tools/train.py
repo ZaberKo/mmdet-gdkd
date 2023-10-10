@@ -4,6 +4,8 @@ import logging
 import os
 import os.path as osp
 
+import torch
+
 from mmengine.config import Config, DictAction
 from mmengine.logging import print_log
 from mmengine.registry import RUNNERS
@@ -16,6 +18,9 @@ def parse_args():
     parser = argparse.ArgumentParser(description='Train a detector')
     parser.add_argument('config', help='train config file path')
     parser.add_argument('--work-dir', help='the dir to save logs and models')
+    parser.add_argument("--model-home", type=str,
+                        default="./models_home", help="model home")
+    parser.add_argument("--wandb-suffix", type=str)
     parser.add_argument(
         '--amp',
         action='store_true',
@@ -115,6 +120,33 @@ def main():
     elif args.resume is not None:
         cfg.resume = True
         cfg.load_from = args.resume
+
+    if args.model_home:
+        if not os.path.exists(args.model_home):
+            os.makedirs(args.model_home, exist_ok=True)
+        torch.hub.set_dir(args.model_home)
+
+    if hasattr(cfg, "wandb_backend"):
+        suffix_list = []
+        if args.wandb_suffix is not None:
+            suffix_list.append(args.wandb_suffix)
+        
+        if args.cfg_options is not None:
+            suffix_list = [f"{k}={v}" for k, v in args.cfg_options.items()] + suffix_list
+
+
+        suffix_str = ",".join(suffix_list)
+        if len(suffix_str)>0:
+            wandb_name = f"{cfg.wandb_backend.init_kwargs.name}|{suffix_str}"
+
+            cfg.wandb_backend.init_kwargs.update(
+                dict(
+                    name=wandb_name,
+                    group=f"{wandb_name}_group"
+                )
+            )
+            cfg.vis_backends[1] = cfg.wandb_backend
+            cfg.visualizer.vis_backends=cfg.vis_backends
 
     # build the runner from config
     if 'runner_type' not in cfg:
