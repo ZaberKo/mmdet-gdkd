@@ -3,7 +3,7 @@ from typing import Optional, Dict, Tuple
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from torch import Tensor
+from torch import Tensor, LongTensor
 
 from mmdet.registry import MODELS
 
@@ -34,7 +34,7 @@ def cat_mask(t, mask1, mask2):
 @weighted_distill_loss
 def knowledge_distillation_dkd_loss(logits_student: Tensor,
                                     logits_teacher: Tensor,
-                                    target: Tensor,
+                                    target: LongTensor,
                                     alpha: float,
                                     beta: float,
                                     T: float,
@@ -86,8 +86,8 @@ def knowledge_distillation_dkd_loss(logits_student: Tensor,
     dkd_loss = alpha * tckd_loss + beta * nckd_loss
 
     train_info = dict(
-        tckd_loss=tckd_loss.detach(),
-        nckd_loss=nckd_loss.detach()
+        loss_tckd=tckd_loss.detach(),
+        loss_nckd=nckd_loss.detach()
     )
 
     return dkd_loss, train_info
@@ -145,7 +145,7 @@ class KnowledgeDistillationDKDLoss(DistillLoss):
         dkd_loss, self.train_info = knowledge_distillation_dkd_loss(
             logits_student,
             logits_teacher,
-            target=target,
+            target=target.long(), # Discretize target
             alpha=self.alpha,
             beta=self.beta,
             T=self.T,

@@ -10,6 +10,7 @@ from mmdet.registry import MODELS
 from .base import DistillLoss
 from .utils import kl_div, weighted_distill_loss
 
+
 @weighted_distill_loss
 def knowledge_distillation_kl_div_loss(logits_student: Tensor,
                                        logits_teacher: Tensor,
@@ -37,7 +38,9 @@ def knowledge_distillation_kl_div_loss(logits_student: Tensor,
 
     kd_loss = kl_div(log_p_student, log_p_teacher, T, kl_type="forward")
 
-    train_info = {}
+    train_info = dict(
+        loss_kd=kd_loss
+    )
 
     return kd_loss, train_info
 
@@ -65,6 +68,7 @@ class KnowledgeDistillationKDLoss(DistillLoss):
     def forward(self,
                 logits_student: Tensor,
                 logits_teacher: Tensor,
+                target: Tensor,
                 weight: Optional[Tensor] = None,
                 avg_factor: Optional[int] = None,
                 reduction_override: Optional[str] = None) -> Tensor:

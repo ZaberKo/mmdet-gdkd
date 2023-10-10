@@ -1,3 +1,4 @@
+from .base import DistillLoss
 from .kd import KnowledgeDistillationKDLoss, knowledge_distillation_kl_div_loss
 from .dkd import KnowledgeDistillationDKDLoss, knowledge_distillation_dkd_loss
 from .gdkd import KnowledgeDistillationGDKDLoss, knowledge_distillation_gdkd_loss

@@ -47,11 +47,12 @@ def knowledge_distillation_dist_loss(logits_student: Tensor,
     inter_loss = inter_class_relation(y_s, y_t) * (T**2)
     intra_loss = intra_class_relation(y_s, y_t) * (T**2)
 
+    # TODO: fixit: use elmentwise loss
     dist_loss = beta * inter_loss + gamma * intra_loss
 
     train_info = dict(
-        inter_loss=inter_loss.detach(),
-        intra_loss=intra_loss.detach()
+        loss_inter=inter_loss.detach(),
+        loss_intra=intra_loss.detach()
     )
 
     return dist_loss, train_info
@@ -82,6 +83,7 @@ class KnowledgeDistillationDISTLoss(DistillLoss):
     def forward(self,
                 logits_student: Tensor,
                 logits_teacher: Tensor,
+                target: Tensor,
                 weight: Optional[Tensor] = None,
                 avg_factor: Optional[int] = None,
                 reduction_override: Optional[str] = None) -> Tensor:

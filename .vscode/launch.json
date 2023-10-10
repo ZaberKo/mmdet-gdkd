@@ -5,17 +5,69 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Train",
+            "name": "Train LD-KD",
             "type": "python",
             "request": "launch",
             "program": "tools/train.py",
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {
-                "PYTHONPATH": "${workspaceFolder}"
+                "WANDB_MODE": "disabled",
+                "PYTHONPATH": "${workspaceFolder}",
             },
             "args": [
                 "configs/ld_mod/ld_kd_r18-gflv1-r101_fpn_1x_coco.py",
+                "--cfg-options",
+                "train_dataloader.batch_size=8"
+            ]
+        },
+        {
+            "name": "Train LD-DKD",
+            "type": "python",
+            "request": "launch",
+            "program": "tools/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "WANDB_MODE": "disabled",
+                "PYTHONPATH": "${workspaceFolder}",
+            },
+            "args": [
+                "configs/ld_mod/ld_dkd_r18-gflv1-r101_fpn_1x_coco.py",
+                "--cfg-options",
+                "train_dataloader.batch_size=8"
+            ]
+        },
+        {
+            "name": "Train LD-GDKD",
+            "type": "python",
+            "request": "launch",
+            "program": "tools/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "WANDB_MODE": "disabled",
+                "PYTHONPATH": "${workspaceFolder}",
+            },
+            "args": [
+                "configs/ld_mod/ld_gdkd_r18-gflv1-r101_fpn_1x_coco.py",
+                "--cfg-options",
+                "train_dataloader.batch_size=8"
+            ]
+        },
+        {
+            "name": "Train LD-DIST",
+            "type": "python",
+            "request": "launch",
+            "program": "tools/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "WANDB_MODE": "disabled",
+                "PYTHONPATH": "${workspaceFolder}",
+            },
+            "args": [
+                "configs/ld_mod/ld_dist_r18-gflv1-r101_fpn_1x_coco.py",
                 "--cfg-options",
                 "train_dataloader.batch_size=8"
             ]
@@ -28,7 +80,8 @@
             "console": "integratedTerminal",
             "justMyCode": false,
             "env": {
-                "PYTHONPATH": "${workspaceFolder}"
+                "PYTHONPATH": "${workspaceFolder}",
+                "WANDB_MODE": "disabled"
             },
             "args": [
                 "configs/gfl_mod/gfl_32bin_r50_fpn_1x_coco.py",

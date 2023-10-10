@@ -95,9 +95,9 @@ def knowledge_distillation_gdkd_loss(logits_student: Tensor,
         log_p2_student, log_p2_teacher, T, kl_type="forward")
 
     train_info = dict(
-        high_loss=high_loss.detach(),
-        low_top_loss=low_top_loss.detach(),
-        low_other_loss=low_other_loss.detach()
+        loss_high=high_loss.detach(),
+        loss_low_top=low_top_loss.detach(),
+        loss_low_other=low_other_loss.detach()
     )
 
     gdkd_loss = w0 * high_loss + w1 * low_top_loss + w2 * low_other_loss
@@ -134,6 +134,7 @@ class KnowledgeDistillationGDKDLoss(DistillLoss):
     def forward(self,
                 logits_student: Tensor,
                 logits_teacher: Tensor,
+                target: Tensor,
                 weight: Optional[Tensor] = None,
                 avg_factor: Optional[int] = None,
                 reduction_override: Optional[str] = None) -> Tensor:

@@ -69,8 +69,8 @@ def weighted_distill_loss(loss_func: Callable) -> Callable:
     """
 
     @functools.wraps(loss_func)
-    def wrapper(pred: Tensor,
-                target: Tensor,
+    def wrapper(pred_student: Tensor,
+                pred_teacher: Tensor,
                 weight: Optional[Tensor] = None,
                 reduction: str = 'mean',
                 avg_factor: Optional[int] = None,
@@ -90,8 +90,12 @@ def weighted_distill_loss(loss_func: Callable) -> Callable:
             Tensor: Loss tensor.
         """
         # get element-wise loss
-        loss, train_info = loss_func(pred, target, **kwargs)
+        loss, train_info = loss_func(pred_student, pred_teacher, **kwargs)
         loss = weight_reduce_loss(loss, weight, reduction, avg_factor)
+        for k in train_info.keys():
+            if isinstance(train_info[k], Tensor) and train_info[k].shape == weight.shape:
+                train_info[k] = weight_reduce_loss(train_info[k], weight, reduction, avg_factor)
+
         return loss, train_info
 
     return wrapper

@@ -13,11 +13,11 @@ from mmdet.registry import MODELS, TASK_UTILS
 from mmdet.structures.bbox import bbox_overlaps
 from mmdet.utils import (ConfigType, InstanceList, MultiConfig, OptConfigType,
                          OptInstanceList, reduce_mean)
-from ..task_modules.prior_generators import anchor_inside_flags
-from ..task_modules.samplers import PseudoSampler
-from ..utils import (filter_scores_and_topk, images_to_levels, multi_apply,
+from mmdet.models.task_modules.prior_generators import anchor_inside_flags
+from mmdet.models.task_modules.samplers import PseudoSampler
+from mmdet.models.utils import (filter_scores_and_topk, images_to_levels, multi_apply,
                      unmap)
-from .anchor_head import AnchorHead
+from mmdet.models.dense_heads.anchor_head import AnchorHead
 
 
 class Integral(nn.Module):
@@ -33,6 +33,7 @@ class Integral(nn.Module):
             settings.
     """
 
+    #TODO: use custom range with #bins instead of [0-reg_max]
     def __init__(self, reg_max: int = 16) -> None:
         super().__init__()
         self.reg_max = reg_max
