@@ -9,7 +9,7 @@ from mmdet.registry import MODELS
 
 
 from .base import DistillLoss
-from .utils import weighted_distill_loss
+from .utils import noweighted_distill_loss
 
 
 def cosine_similarity(a, b, eps=1e-8):
@@ -29,7 +29,7 @@ def intra_class_relation(y_s, y_t):
     return inter_class_relation(y_s.transpose(0, 1), y_t.transpose(0, 1))
 
 
-@weighted_distill_loss
+@noweighted_distill_loss
 def knowledge_distillation_dist_loss(logits_student: Tensor,
                                      logits_teacher: Tensor,
                                      beta: float,
@@ -47,7 +47,6 @@ def knowledge_distillation_dist_loss(logits_student: Tensor,
     inter_loss = inter_class_relation(y_s, y_t) * (T**2)
     intra_loss = intra_class_relation(y_s, y_t) * (T**2)
 
-    # TODO: fixit: use elmentwise loss
     dist_loss = beta * inter_loss + gamma * intra_loss
 
     train_info = dict(

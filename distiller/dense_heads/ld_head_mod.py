@@ -154,9 +154,9 @@ class LDHeadMod(LDHead):
             ld_train_info = self.loss_ld.train_info
 
         else:
-            loss_ld = bbox_pred.sum() * 0
             loss_bbox = bbox_pred.sum() * 0
             loss_dfl = bbox_pred.sum() * 0
+            loss_ld = bbox_pred.sum() * 0
             weight_targets = bbox_pred.new_tensor(0)
             ld_train_info = {}
 
@@ -215,6 +215,7 @@ class LDHeadMod(LDHead):
 
         (anchor_list, labels_list, label_weights_list, bbox_targets_list,
          bbox_weights_list, avg_factor) = cls_reg_targets
+        # here avg_factor = #number of positive samples
 
         avg_factor = reduce_mean(
             torch.tensor(avg_factor, dtype=torch.float, device=device)).item()
@@ -232,22 +233,31 @@ class LDHeadMod(LDHead):
                 soft_targets,
                 avg_factor=avg_factor)
 
-        avg_factor = sum(avg_factor) + 1e-6
-        avg_factor = reduce_mean(avg_factor).item()
+        # Note: above losses_bbox|dfl|ld use weighted sum.
+        # To make the weight across batch-level on DDP,
+        # use reduced sum of weights: avg_factor
+        avg_factor = sum(avg_factor)
+        # align with new official GFLHead (#4978)
+        avg_factor = reduce_mean(avg_factor).clamp_(min=1).item()
+        # Caution: every FPN layer must have same number of samples,
+        # Otherwise sum(avg_factor) will be wrong
+
         losses_bbox = [x / avg_factor for x in losses_bbox]
         losses_dfl = [x / avg_factor for x in losses_dfl]
-
-        # also apply to loss_ld:
-        losses_ld = [x / avg_factor for x in losses_ld]
+        if type(self.loss_ld).__name__ != "KnowledgeDistillationDISTLoss":
+            losses_ld = [x / avg_factor for x in losses_ld]
 
         # Average ld_train_infos:
-        # TODO: test non FPN cases
+        # should work on FPN cases
         ld_train_info_summary = {}
+
         for k in ld_train_infos[0].keys():
             ld_train_info_summary[k] = sum(
                 [ld_train_info[k] for ld_train_info in ld_train_infos
-                 if len(ld_train_info) > 0] # avoid empty ld_train_info
-            )/avg_factor
+                 if len(ld_train_info) > 0]  # avoid empty ld_train_info
+            )
+            if type(self.loss_ld).__name__ != "KnowledgeDistillationDISTLoss":
+                ld_train_info_summary[k] /= avg_factor
 
         # Then add them to message_hub
         self.record_ld_train_info(ld_train_info_summary)
