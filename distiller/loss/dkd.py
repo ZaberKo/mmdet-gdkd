@@ -118,7 +118,7 @@ class KnowledgeDistillationDKDLoss(DistillLoss):
     def forward(self,
                 logits_student: Tensor,
                 logits_teacher: Tensor,
-                target: Tensor,
+                target: Tensor = None,
                 weight: Optional[Tensor] = None,
                 avg_factor: Optional[int] = None,
                 reduction_override: Optional[str] = None) -> Tensor:
@@ -141,6 +141,8 @@ class KnowledgeDistillationDKDLoss(DistillLoss):
         assert reduction_override in (None, 'none', 'mean', 'sum')
         reduction = (
             reduction_override if reduction_override else self.reduction)
+        
+        assert target is not None
 
         dkd_loss, self.train_info = knowledge_distillation_dkd_loss(
             logits_student,

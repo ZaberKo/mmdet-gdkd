@@ -9,7 +9,7 @@ from mmdet.registry import MODELS
 
 
 from .base import DistillLoss
-from .utils import noweighted_distill_loss
+from .utils import weighted_distill_loss
 
 
 def cosine_similarity(a, b, eps=1e-8):
@@ -22,20 +22,17 @@ def pearson_correlation(a, b, eps=1e-8):
 
 
 def inter_class_relation(y_s, y_t):
-    return 1 - pearson_correlation(y_s, y_t).mean()
+    n = y_s.shape[0]
+    # [B], and its .mean() is inter_class_relation
+    return n - pearson_correlation(y_s, y_t)
 
 
-def intra_class_relation(y_s, y_t):
-    return inter_class_relation(y_s.transpose(0, 1), y_t.transpose(0, 1))
-
-
-@noweighted_distill_loss
-def knowledge_distillation_dist_loss(logits_student: Tensor,
-                                     logits_teacher: Tensor,
-                                     beta: float,
-                                     gamma: float,
-                                     T: float,
-                                     detach_teacher: bool = True) -> Tuple[Tensor, Dict[str, Tensor]]:
+@weighted_distill_loss
+def knowledge_distillation_distmod_loss(logits_student: Tensor,
+                                        logits_teacher: Tensor,
+                                        beta: float,
+                                        T: float,
+                                        detach_teacher: bool = True) -> Tuple[Tensor, Dict[str, Tensor]]:
     assert logits_student.size() == logits_teacher.size()
 
     # TODO: is it necessary in here?
@@ -45,20 +42,18 @@ def knowledge_distillation_dist_loss(logits_student: Tensor,
     y_s = F.softmax(logits_student / T, dim=1)
     y_t = F.softmax(logits_teacher / T, dim=1)
     inter_loss = inter_class_relation(y_s, y_t) * (T**2)
-    intra_loss = intra_class_relation(y_s, y_t) * (T**2)
 
-    dist_loss = beta * inter_loss + gamma * intra_loss
+    dist_loss = beta * inter_loss
 
     train_info = dict(
-        loss_inter=inter_loss.detach(),
-        loss_intra=intra_loss.detach()
+        loss_inter=inter_loss.detach()
     )
 
     return dist_loss, train_info
 
 
 @MODELS.register_module()
-class KnowledgeDistillationDISTLoss(DistillLoss):
+class KnowledgeDistillationDISTModLoss(DistillLoss):
     """Loss function for knowledge distilling using KL divergence.
 
     Args:
@@ -69,14 +64,12 @@ class KnowledgeDistillationDISTLoss(DistillLoss):
 
     def __init__(self,
                  beta: float,
-                 gamma: float,
                  T: float = 1.0,
                  reduction: str = 'mean',
                  loss_weight: float = 1.0) -> None:
         super().__init__(reduction=reduction, loss_weight=loss_weight)
 
         self.beta = beta
-        self.gamma = gamma
         self.T = T
 
     def forward(self,
@@ -90,11 +83,10 @@ class KnowledgeDistillationDISTLoss(DistillLoss):
         reduction = (
             reduction_override if reduction_override else self.reduction)
 
-        dist_loss, self.train_info = knowledge_distillation_dist_loss(
+        dist_loss, self.train_info = knowledge_distillation_distmod_loss(
             logits_student,
             logits_teacher,
             beta=self.beta,
-            gamma=self.gamma,
             T=self.T,
             weight=weight,
             reduction=reduction,

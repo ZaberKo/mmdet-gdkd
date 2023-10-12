@@ -9,14 +9,14 @@ from mmdet.structures import SampleList
 from mmdet.structures.bbox import bbox_overlaps
 from mmdet.utils import ConfigType, InstanceList, OptInstanceList, reduce_mean
 from mmdet.models.utils import multi_apply, unpack_gt_instances
-from mmdet.models.dense_heads import LDHead
+from mmdet.models.dense_heads import GFLHead
 from mmengine import MessageHub
 
 from ..loss import DistillLoss
 
 
 @MODELS.register_module()
-class LDHeadMod(LDHead):
+class LDHeadMod(GFLHead):
     """Localization distillation Head. (Short description)
 
     It utilizes the learned bbox distributions to transfer the localization
@@ -38,19 +38,62 @@ class LDHeadMod(LDHead):
                      type='KnowledgeDistillationKDLoss',
                      loss_weight=0.25,
                      T=10),
+                 loss_cls_kd: ConfigType = None, # default disabled cls_kd
                  **kwargs) -> dict:
-
+    
         super().__init__(
-            num_classes=num_classes, in_channels=in_channels, loss_ld=loss_ld, **kwargs)
+            num_classes=num_classes, in_channels=in_channels, **kwargs)
 
+        self.loss_ld = MODELS.build(loss_ld)
         assert isinstance(
-            self.loss_ld, DistillLoss), "loss_ld must be subclass of DistillLoss"
+            self.loss_ld, DistillLoss
+        ), "loss_ld must be subclass of DistillLoss"
+
+        if loss_cls_kd is not None:
+            self.loss_cls_kd = MODELS.build(loss_cls_kd)
+            assert isinstance(
+                self.loss_cls_kd, DistillLoss
+            ), "loss_cls_kd must be subclass of DistillLoss"
+
+    def loss(self, x: List[Tensor], out_teacher: Tuple[Tensor],
+             batch_data_samples: SampleList) -> dict:
+        """
+        Args:
+            x (list[Tensor]): Features from FPN.
+            out_teacher (tuple[Tensor]): The output of teacher.
+            batch_data_samples (list[:obj:`DetDataSample`]): The batch
+                data samples. It usually includes information such
+                as `gt_instance` or `gt_panoptic_seg` or `gt_sem_seg`.
+
+        Returns:
+            tuple[dict, list]: The loss components and proposals of each image.
+
+            - losses (dict[str, Tensor]): A dictionary of loss components.
+            - proposal_list (list[Tensor]): Proposals of each image.
+        """
+        outputs = unpack_gt_instances(batch_data_samples)
+        batch_gt_instances, batch_gt_instances_ignore, batch_img_metas \
+            = outputs
+
+        cls_scores, bbox_preds = self(x)
+        soft_cls_targets, soft_bbox_targets = out_teacher
+
+        losses = self.loss_by_feat(
+            cls_scores=cls_scores, 
+            bbox_preds=bbox_preds,
+            batch_gt_instances=batch_gt_instances,
+            batch_img_metas=batch_img_metas,
+            soft_cls_targets=soft_cls_targets,
+            soft_bbox_targets=soft_bbox_targets,
+            batch_gt_instances_ignore=batch_gt_instances_ignore)
+
+        return losses
 
     def loss_by_feat_single(self, anchors: Tensor, cls_score: Tensor,
                             bbox_pred: Tensor, labels: Tensor,
-                            label_weights: Tensor, bbox_targets: Tensor,
-                            stride: Tuple[int], soft_targets: Tensor,
-                            avg_factor: int):
+                            label_weights: Tensor, bbox_target: Tensor,
+                            stride: Tuple[int], soft_cls_target: Tensor,
+                            soft_bbox_target: Tensor, avg_factor: int):
         """Calculate the loss of a single scale level based on the features
         extracted by the detection head.
 
@@ -85,14 +128,16 @@ class LDHeadMod(LDHead):
         # [B, num_classes-1] only include fg cls_score
         cls_score = cls_score.permute(0, 2, 3,
                                       1).reshape(-1, self.cls_out_channels)
+        soft_cls_target = soft_cls_target.permute(0, 2, 3,
+                                      1).reshape(-1, self.cls_out_channels)
         # [B, (reg_max+1)*4]
         bbox_pred = bbox_pred.permute(0, 2, 3,
                                       1).reshape(-1, 4 * (self.reg_max + 1))
-        soft_targets = soft_targets.permute(0, 2, 3,
+        soft_bbox_target = soft_bbox_target.permute(0, 2, 3,
                                             1).reshape(-1,
                                                        4 * (self.reg_max + 1))
 
-        bbox_targets = bbox_targets.reshape(-1, 4)
+        bbox_target = bbox_target.reshape(-1, 4)
         labels = labels.reshape(-1)
         label_weights = label_weights.reshape(-1)
 
@@ -103,7 +148,7 @@ class LDHeadMod(LDHead):
         score = label_weights.new_zeros(labels.shape)
 
         if len(pos_inds) > 0:
-            pos_bbox_targets = bbox_targets[pos_inds]
+            pos_bbox_targets = bbox_target[pos_inds]
             pos_bbox_pred = bbox_pred[pos_inds]
             pos_anchors = anchors[pos_inds]
             pos_anchor_centers = self.anchor_center(pos_anchors) / stride[0]
@@ -121,7 +166,7 @@ class LDHeadMod(LDHead):
 
             # pred_corners, soft_corners [B_p*4, reg_max+1]
             pred_corners = pos_bbox_pred.reshape(-1, self.reg_max + 1)
-            pos_soft_targets = soft_targets[pos_inds]
+            pos_soft_targets = soft_bbox_target[pos_inds]
             soft_corners = pos_soft_targets.reshape(-1, self.reg_max + 1)
 
             # target_corners [B_p*4]
@@ -151,6 +196,9 @@ class LDHeadMod(LDHead):
                 weight=weight_targets[:, None].expand(-1, 4).reshape(-1),
                 avg_factor=4.0)
 
+            # TODO: add vlr & kd loss:
+
+
             ld_train_info = self.loss_ld.train_info
 
         else:
@@ -165,8 +213,18 @@ class LDHeadMod(LDHead):
             cls_score, (labels, score),
             weight=label_weights,
             avg_factor=avg_factor)
+        
+        if hasattr(self, "loss_cls_kd"):
+            # for fg objects:
+            loss_cls_kd = self.loss_cls_kd(
+                cls_score[pos_inds],
+                soft_cls_target[pos_inds],
+                weight=label_weights[pos_inds]
+            )
+        else:
+            loss_cls_kd = cls_score.sum() * 0
 
-        return loss_cls, loss_bbox, loss_dfl, loss_ld, ld_train_info, weight_targets.sum()
+        return loss_cls, loss_bbox, loss_dfl, loss_cls_kd, loss_ld, ld_train_info, weight_targets.sum()
 
     def loss_by_feat(
             self,
@@ -174,7 +232,8 @@ class LDHeadMod(LDHead):
             bbox_preds: List[Tensor],
             batch_gt_instances: InstanceList,
             batch_img_metas: List[dict],
-            soft_targets: List[Tensor],
+            soft_cls_targets: List[Tensor],
+            soft_bbox_targets: List[Tensor],
             batch_gt_instances_ignore: OptInstanceList = None) -> dict:
         """Compute losses of the head.
 
@@ -220,7 +279,7 @@ class LDHeadMod(LDHead):
         avg_factor = reduce_mean(
             torch.tensor(avg_factor, dtype=torch.float, device=device)).item()
 
-        (losses_cls, losses_bbox, losses_dfl, losses_ld, ld_train_infos,
+        (losses_cls, losses_bbox, losses_dfl, losses_cls_kd, losses_ld, ld_train_infos,
             avg_factor) = multi_apply(
                 self.loss_by_feat_single,
                 anchor_list,
@@ -230,7 +289,8 @@ class LDHeadMod(LDHead):
                 label_weights_list,
                 bbox_targets_list,
                 self.prior_generator.strides,
-                soft_targets,
+                soft_cls_targets,
+                soft_bbox_targets,
                 avg_factor=avg_factor)
 
         # Note: above losses_bbox|dfl|ld use weighted sum.
@@ -244,6 +304,8 @@ class LDHeadMod(LDHead):
 
         losses_bbox = [x / avg_factor for x in losses_bbox]
         losses_dfl = [x / avg_factor for x in losses_dfl]
+
+        losses_cls_kd = [x / avg_factor for x in losses_cls_kd]
         if type(self.loss_ld).__name__ != "KnowledgeDistillationDISTLoss":
             losses_ld = [x / avg_factor for x in losses_ld]
 
@@ -273,6 +335,8 @@ class LDHeadMod(LDHead):
 
         _train_info = {}
         for k, v in train_info.items():
-            _train_info[f"train/kd/{k}"] = v
+            _train_info[f"train/ld/{k}"] = v
 
         message_hub.update_scalars(_train_info)
+
+

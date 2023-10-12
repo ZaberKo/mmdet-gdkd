@@ -68,7 +68,7 @@ class KnowledgeDistillationKDLoss(DistillLoss):
     def forward(self,
                 logits_student: Tensor,
                 logits_teacher: Tensor,
-                target: Tensor,
+                target: Tensor = None,
                 weight: Optional[Tensor] = None,
                 avg_factor: Optional[int] = None,
                 reduction_override: Optional[str] = None) -> Tensor:
