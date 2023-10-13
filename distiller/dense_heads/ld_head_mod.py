@@ -38,12 +38,14 @@ class LDHeadMod(GFLHead):
                      type='KnowledgeDistillationKDLoss',
                      loss_weight=0.25,
                      T=10),
-                 loss_cls_kd: ConfigType = None, # default disabled cls_kd
+                 loss_ld_avg_mode: str = "weighted_sum",  # "weighted_sum" or "mean"
+                 loss_cls_kd: ConfigType = None,  # default disabled cls_kd
                  **kwargs) -> dict:
-    
+
         super().__init__(
             num_classes=num_classes, in_channels=in_channels, **kwargs)
 
+        self.loss_ld_avg_mode = loss_ld_avg_mode
         self.loss_ld = MODELS.build(loss_ld)
         assert isinstance(
             self.loss_ld, DistillLoss
@@ -79,7 +81,7 @@ class LDHeadMod(GFLHead):
         soft_cls_targets, soft_bbox_targets = out_teacher
 
         losses = self.loss_by_feat(
-            cls_scores=cls_scores, 
+            cls_scores=cls_scores,
             bbox_preds=bbox_preds,
             batch_gt_instances=batch_gt_instances,
             batch_img_metas=batch_img_metas,
@@ -129,13 +131,13 @@ class LDHeadMod(GFLHead):
         cls_score = cls_score.permute(0, 2, 3,
                                       1).reshape(-1, self.cls_out_channels)
         soft_cls_target = soft_cls_target.permute(0, 2, 3,
-                                      1).reshape(-1, self.cls_out_channels)
+                                                  1).reshape(-1, self.cls_out_channels)
         # [B, (reg_max+1)*4]
         bbox_pred = bbox_pred.permute(0, 2, 3,
                                       1).reshape(-1, 4 * (self.reg_max + 1))
         soft_bbox_target = soft_bbox_target.permute(0, 2, 3,
-                                            1).reshape(-1,
-                                                       4 * (self.reg_max + 1))
+                                                    1).reshape(-1,
+                                                               4 * (self.reg_max + 1))
 
         bbox_target = bbox_target.reshape(-1, 4)
         labels = labels.reshape(-1)
@@ -189,15 +191,21 @@ class LDHeadMod(GFLHead):
                 avg_factor=4.0)
 
             # ld loss
-            loss_ld = self.loss_ld(
-                pred_corners,
-                soft_corners,
-                target_corners,
-                weight=weight_targets[:, None].expand(-1, 4).reshape(-1),
-                avg_factor=4.0)
-
-            # TODO: add vlr & kd loss:
-
+            if self.loss_ld_avg_mode == "weighted_sum":
+                loss_ld = self.loss_ld(
+                    pred_corners,
+                    soft_corners,
+                    target_corners,
+                    weight=weight_targets[:, None].expand(-1, 4).reshape(-1),
+                    avg_factor=4.0)
+            elif self.loss_ld_avg_mode == "mean":
+                loss_ld = self.loss_ld(
+                    pred_corners,
+                    soft_corners,
+                    target_corners
+                )
+            else:
+                NotImplementedError
 
             ld_train_info = self.loss_ld.train_info
 
@@ -213,7 +221,7 @@ class LDHeadMod(GFLHead):
             cls_score, (labels, score),
             weight=label_weights,
             avg_factor=avg_factor)
-        
+
         if hasattr(self, "loss_cls_kd"):
             # for fg objects:
             loss_cls_kd = self.loss_cls_kd(
@@ -223,6 +231,8 @@ class LDHeadMod(GFLHead):
             )
         else:
             loss_cls_kd = cls_score.sum() * 0
+
+        # TODO: add diou-based vlr support:
 
         return loss_cls, loss_bbox, loss_dfl, loss_cls_kd, loss_ld, ld_train_info, weight_targets.sum()
 
@@ -310,7 +320,6 @@ class LDHeadMod(GFLHead):
             losses_ld = [x / avg_factor for x in losses_ld]
 
         # Average ld_train_infos:
-        # should work on FPN cases
         ld_train_info_summary = {}
 
         for k in ld_train_infos[0].keys():
@@ -318,7 +327,8 @@ class LDHeadMod(GFLHead):
                 [ld_train_info[k] for ld_train_info in ld_train_infos
                  if len(ld_train_info) > 0]  # avoid empty ld_train_info
             )
-            if type(self.loss_ld).__name__ != "KnowledgeDistillationDISTLoss":
+            if (self.loss_ld_avg_mode == "weighted_sum" and
+                    type(self.loss_ld).__name__ != "KnowledgeDistillationDISTLoss"):
                 ld_train_info_summary[k] /= avg_factor
 
         # Then add them to message_hub
@@ -338,5 +348,3 @@ class LDHeadMod(GFLHead):
             _train_info[f"train/ld/{k}"] = v
 
         message_hub.update_scalars(_train_info)
-
-

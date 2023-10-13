@@ -65,7 +65,10 @@ def weighted_distill_loss(loss_func: Callable) -> Callable:
         loss, train_info = loss_func(pred_student, pred_teacher, **kwargs)
         loss = weight_reduce_loss(loss, weight, reduction, avg_factor)
         for k in train_info.keys():
-            if isinstance(train_info[k], Tensor) and train_info[k].shape == weight.shape:
+            if isinstance(train_info[k], Tensor):
+                if weight is not None:
+                    assert train_info[k].shape == weight.shape
+                    
                 train_info[k] = weight_reduce_loss(
                     train_info[k], weight, reduction, avg_factor)
 
