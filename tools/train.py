@@ -16,7 +16,7 @@ from mmdet.utils import setup_cache_size_limit_of_dynamo
 
 def parse_args():
     parser = argparse.ArgumentParser(description='Train a detector')
-    parser.add_argument('config', help='train config file path')
+    parser.add_argument('config', nargs='+', help='train config file path')
     parser.add_argument('--work-dir', help='the dir to save logs and models')
     parser.add_argument("--model-home", type=str,
                         default="./models_home", help="model home")
@@ -72,7 +72,12 @@ def main():
     setup_cache_size_limit_of_dynamo()
 
     # load config
-    cfg = Config.fromfile(args.config)
+    cfg = Config.fromfile(args.config[0])
+
+    for config_file in args.config[1:]:
+        _cfg = Config.fromfile(config_file)
+        cfg.merge_from_dict(_cfg)
+    
     cfg.launcher = args.launcher
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
@@ -84,7 +89,7 @@ def main():
     elif cfg.get('work_dir', None) is None:
         # use config filename as default work_dir if cfg.work_dir is None
         cfg.work_dir = osp.join('./work_dirs',
-                                osp.splitext(osp.basename(args.config))[0])
+                                osp.splitext(osp.basename(args.config[0]))[0])
 
     # enable automatic-mixed-precision training
     if args.amp is True:
