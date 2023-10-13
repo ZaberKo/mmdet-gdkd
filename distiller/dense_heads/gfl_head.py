@@ -16,8 +16,8 @@ from mmdet.utils import (ConfigType, InstanceList, MultiConfig, OptConfigType,
 from mmdet.models.task_modules.prior_generators import anchor_inside_flags
 from mmdet.models.task_modules.samplers import PseudoSampler
 from mmdet.models.utils import (filter_scores_and_topk, images_to_levels, multi_apply,
-                     unmap)
-from mmdet.models.dense_heads.anchor_head import AnchorHead
+                                unmap)
+from mmdet.models.dense_heads import AnchorHead
 
 
 class Integral(nn.Module):
@@ -33,7 +33,7 @@ class Integral(nn.Module):
             settings.
     """
 
-    #TODO: use custom range with #bins instead of [0-reg_max]
+    # TODO: use custom range with #bins instead of [0-reg_max]
     def __init__(self, reg_max: int = 16) -> None:
         super().__init__()
         self.reg_max = reg_max
@@ -58,7 +58,7 @@ class Integral(nn.Module):
 
 
 @MODELS.register_module()
-class GFLHead(AnchorHead):
+class GFLHeadDebug(AnchorHead):
     """Generalized Focal Loss: Learning Qualified and Distributed Bounding
     Boxes for Dense Object Detection.
 
@@ -445,6 +445,7 @@ class GFLHead(AnchorHead):
         nms_pre = cfg.get('nms_pre', -1)
 
         mlvl_bboxes = []
+        mlvl_bboxes_logits = []
         mlvl_scores = []
         mlvl_labels = []
         for level_idx, (cls_score, bbox_pred, stride, priors) in enumerate(
@@ -454,6 +455,7 @@ class GFLHead(AnchorHead):
             assert stride[0] == stride[1]
 
             bbox_pred = bbox_pred.permute(1, 2, 0)
+            bbox_pred_logits = bbox_pred.reshape(-1, 4, self.reg_max+1)
             bbox_pred = self.integral(bbox_pred) * stride[0]
 
             scores = cls_score.permute(1, 2, 0).reshape(
@@ -466,20 +468,27 @@ class GFLHead(AnchorHead):
             # `nms_pre` than before.
             results = filter_scores_and_topk(
                 scores, cfg.score_thr, nms_pre,
-                dict(bbox_pred=bbox_pred, priors=priors))
-            scores, labels, _, filtered_results = results
+                results=dict(bbox_pred=bbox_pred,
+                             priors=priors,
+                             bbox_pre_logits=bbox_pred_logits))
+            scores, labels, keep_idxs, filtered_results = results
+            
 
             bbox_pred = filtered_results['bbox_pred']
             priors = filtered_results['priors']
+            bbox_pred_logits = filtered_results['bbox_pre_logits']
 
             bboxes = self.bbox_coder.decode(
                 self.anchor_center(priors), bbox_pred, max_shape=img_shape)
             mlvl_bboxes.append(bboxes)
+            mlvl_bboxes_logits.append(bbox_pred_logits)
             mlvl_scores.append(scores)
             mlvl_labels.append(labels)
+            
 
         results = InstanceData()
         results.bboxes = torch.cat(mlvl_bboxes)
+        results.bboxes_logits = torch.cat(mlvl_bboxes_logits)
         results.scores = torch.cat(mlvl_scores)
         results.labels = torch.cat(mlvl_labels)
 
@@ -489,6 +498,24 @@ class GFLHead(AnchorHead):
             rescale=rescale,
             with_nms=with_nms,
             img_meta=img_meta)
+
+    def _bbox_post_process(self,
+                           results: InstanceData,
+                           cfg: ConfigDict,
+                           rescale: bool = False,
+                           with_nms: bool = True,
+                           img_meta: Optional[dict] = None) -> InstanceData:
+        results = super()._bbox_post_process(results, cfg, rescale, with_nms,img_meta)
+
+        if rescale:
+            assert img_meta.get('scale_factor') is not None
+            scale_factor = [1 / s for s in img_meta['scale_factor']]
+            repeat_num = int(results.bboxes.size(-1) / 2)
+            #TODO: check broadcast
+            scale_factor = results.bboxes_logits.new_tensor(scale_factor).repeat((1, repeat_num)).unsqueeze(-1)
+            results.bboxes_logits = results.bboxes_logits * scale_factor
+
+        return results
 
     def get_targets(self,
                     anchor_list: List[Tensor],
