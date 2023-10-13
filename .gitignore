@@ -257,4 +257,4 @@ data/
 script/
 work_dirs/
 models_home/
-*debug*
+debug.py

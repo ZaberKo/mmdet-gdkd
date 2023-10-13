@@ -56,6 +56,23 @@
             ]
         },
         {
+            "name": "Train LD-KD(ori)",
+            "type": "python",
+            "request": "launch",
+            "program": "tools/train.py",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "WANDB_MODE": "disabled",
+                "PYTHONPATH": "${workspaceFolder}",
+            },
+            "args": [
+                "configs/ld/ld_r18-gflv1-r101_fpn_1x_coco_debug.py",
+                // "--cfg-options",
+                // "train_dataloader.batch_size=8"
+            ]
+        },
+        {
             "name": "Train LD-DKD",
             "type": "python",
             "request": "launch",

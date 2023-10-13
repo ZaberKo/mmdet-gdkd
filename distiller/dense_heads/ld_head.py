@@ -11,9 +11,11 @@ from mmdet.utils import ConfigType, InstanceList, OptInstanceList, reduce_mean
 from mmdet.models.utils import multi_apply, unpack_gt_instances
 from mmdet.models.dense_heads.gfl_head import GFLHead
 
+from mmengine import MessageHub
+
 
 @MODELS.register_module()
-class LDHead(GFLHead):
+class LDHeadDebug(GFLHead):
     """Localization distillation Head. (Short description)
 
     It utilizes the learned bbox distributions to transfer the localization
@@ -250,6 +252,12 @@ class LDHead(GFLHead):
         avg_factor = reduce_mean(avg_factor).item()
         losses_bbox = [x / avg_factor for x in losses_bbox]
         losses_dfl = [x / avg_factor for x in losses_dfl]
+
+        message_hub = MessageHub.get_current_instance()
+        message_hub.update_scalar("train/bbox_avg_fractor", avg_factor)
+        message_hub.update_scalar(
+            "train/ld_real_avg_fractor_ratio", avg_factor/(self.reg_max+1))
+
         return dict(
             loss_cls=losses_cls,
             loss_bbox=losses_bbox,
