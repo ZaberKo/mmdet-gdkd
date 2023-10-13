@@ -12,7 +12,7 @@ model = dict(
         loss_ld=dict(
             type='KnowledgeDistillationDISTModLoss', 
             loss_weight=0.5,
-            beta=2.0,
+            beta=1.0,
             T=4),
         reg_max=16)
 )

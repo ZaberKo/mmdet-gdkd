@@ -9,7 +9,7 @@ model = dict(
         loss_cls_kd=dict(
             type='KnowledgeDistillationDISTModLoss',
             loss_weight=1.0,
-            beta=1,
+            beta=1.0,
             T=1)
     )
 )
