@@ -4,14 +4,13 @@ model = dict(
     bbox_head=dict(
         loss_ld=dict(
             type='KnowledgeDistillationKDLoss',
-            # Note: linear scale loss with ori weight (10**2)/(4**2)*(0.25/17)=0.0919
-            loss_weight=0.25,
+            loss_weight=0.5,
             T=4),
         loss_cls_kd=dict(
             type='KnowledgeDistillationDISTModLoss',
             loss_weight=1.0,
-            beta=2,
-            T=2)
+            beta=1,
+            T=1)
     )
 )
 

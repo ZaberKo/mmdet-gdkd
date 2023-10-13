@@ -11,8 +11,8 @@ model = dict(
         type='LDHeadMod',
         loss_ld=dict(
             type='KnowledgeDistillationKDLoss',
-            # Note: linear scale loss with ori weight (10**2)/(4**2)*(0.25/17)=0.0919
-            loss_weight=0.25,
+            # Note: 0.25 * [2-3]
+            loss_weight=0.5,
             T=4),
         reg_max=16)
 )

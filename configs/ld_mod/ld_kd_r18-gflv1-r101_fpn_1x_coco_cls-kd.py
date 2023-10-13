@@ -5,12 +5,12 @@ model = dict(
     bbox_head=dict(
         loss_ld=dict(
             type='KnowledgeDistillationKDLoss',
-            loss_weight=0.25,
+            loss_weight=0.5,
             T=4),
         loss_cls_kd=dict(
             type='KnowledgeDistillationKDLoss',
-            loss_weight=10,
-            T=2)
+            loss_weight=1.0,
+            T=1)
     )
 )
 
