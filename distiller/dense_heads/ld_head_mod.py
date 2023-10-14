@@ -316,6 +316,9 @@ class LDHeadMod(GFLHead):
         losses_bbox = [x / avg_factor for x in losses_bbox]
         losses_dfl = [x / avg_factor for x in losses_dfl]
 
+        # Note: losses_ld is intended not being divided by avg_factor in ori impl 
+        # for better performance (by increased kd impact during traing).
+        # Here we do not follow this impl for simplicity.
         losses_cls_kd = [x / avg_factor for x in losses_cls_kd]
         if type(self.loss_ld).__name__ != "KnowledgeDistillationDISTLoss":
             losses_ld = [x / avg_factor for x in losses_ld]

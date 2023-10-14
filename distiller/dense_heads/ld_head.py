@@ -254,9 +254,9 @@ class LDHeadDebug(GFLHead):
         losses_dfl = [x / avg_factor for x in losses_dfl]
 
         message_hub = MessageHub.get_current_instance()
-        message_hub.update_scalar("train/bbox_avg_fractor", avg_factor)
+        message_hub.update_scalar("train/bbox_avg_factor", avg_factor)
         message_hub.update_scalar(
-            "train/ld_real_avg_fractor_ratio", avg_factor/(self.reg_max+1))
+            "train/ld_real_avg_factor_ratio", avg_factor/(self.reg_max+1))
 
         return dict(
             loss_cls=losses_cls,
