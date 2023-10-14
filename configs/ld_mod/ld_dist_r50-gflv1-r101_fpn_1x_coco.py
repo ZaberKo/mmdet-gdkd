@@ -1,4 +1,4 @@
-_base_ = ['./ld_r18-gflv1-r101_fpn_1x_coco.py']
+_base_ = ['./ld_dist_r18-gflv1-r101_fpn_1x_coco.py']
 model = dict(
     backbone=dict(
         type='ResNet',
@@ -17,3 +17,19 @@ model = dict(
         start_level=1,
         add_extra_convs='on_output',
         num_outs=5))
+
+_base_.wandb_backend.init_kwargs.update(
+    dict(
+        name='{{fileBasenameNoExtension}}',
+        group='{{fileBasenameNoExtension}}_group',
+        tags=['ld', 'dist', 'r18-gflv1-r101', 'fpn', '1x', 'coco']
+    )
+)
+
+
+vis_backends = [
+    dict(type='LocalVisBackend'),
+    _base_.wandb_backend
+]
+visualizer = dict(
+    type='DetLocalVisualizer', vis_backends=vis_backends, name='visualizer')
