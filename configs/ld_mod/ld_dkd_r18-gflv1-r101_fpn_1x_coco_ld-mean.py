@@ -1,4 +1,4 @@
-_base_ = ['./ld_kd_r18-gflv1-r101_fpn_1x_coco.py']
+_base_ = ['./ld_dkd_r18-gflv1-r101_fpn_1x_coco.py']
 
 model = dict(
     bbox_head=dict(
@@ -10,7 +10,7 @@ _base_.wandb_backend.init_kwargs.update(
     dict(
         name='{{fileBasenameNoExtension}}',
         group='{{fileBasenameNoExtension}}_group',
-        tags=['ld', 'kd', 'r18-gflv1-r101', 'fpn', '1x', 'coco','ld-mean']
+        tags=['ld', 'dkd', 'r18-gflv1-r101', 'fpn', '1x', 'coco','ld-mean']
     )
 )
 
