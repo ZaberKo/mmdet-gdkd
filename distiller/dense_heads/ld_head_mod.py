@@ -208,7 +208,7 @@ class LDHeadMod(GFLHead):
                 NotImplementedError
 
             ld_train_info = self.loss_ld.train_info
-            
+
             if hasattr(self, "loss_cls_kd"):
                 # for fg objects:
                 loss_cls_kd = self.loss_cls_kd(
@@ -217,14 +217,14 @@ class LDHeadMod(GFLHead):
                     weight=label_weights[pos_inds]
                 )
             else:
-                loss_cls_kd = cls_score.new_tensor(0)
+                loss_cls_kd = cls_score.sum() * 0
 
         else:
-            loss_bbox = bbox_pred.new_tensor(0)
-            loss_dfl = bbox_pred.new_tensor(0)
-            loss_ld = bbox_pred.new_tensor(0)
-            loss_cls_kd = cls_score.new_tensor(0)
-            weight_targets = bbox_pred.new_tensor(0)
+            loss_bbox = bbox_pred.sum() * 0
+            loss_dfl = bbox_pred.sum() * 0
+            loss_ld = bbox_pred.sum() * 0
+            loss_cls_kd = cls_score.sum() * 0
+            weight_targets = bbox_pred.sum() * 0
             ld_train_info = {}
 
         # cls (qfl) loss
@@ -335,15 +335,15 @@ class LDHeadMod(GFLHead):
         # Then add them to message_hub
         self.record_ld_train_info(ld_train_info_summary)
 
-        losses_dict= dict(
+        losses_dict = dict(
             loss_cls=losses_cls,
             loss_bbox=losses_bbox,
             loss_dfl=losses_dfl,
             loss_ld=losses_ld)
-        
+
         if hasattr(self, "loss_cls_kd"):
-            losses_dict["loss_cls_kd"]=losses_cls_kd
-        
+            losses_dict["loss_cls_kd"] = losses_cls_kd
+
         return losses_dict
 
     def record_ld_train_info(self, train_info):
