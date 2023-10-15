@@ -95,7 +95,7 @@ class LDHeadMod(GFLHead):
                             bbox_pred: Tensor, labels: Tensor,
                             label_weights: Tensor, bbox_target: Tensor,
                             stride: Tuple[int], soft_cls_target: Tensor,
-                            soft_bbox_target: Tensor, avg_factor: int):
+                            soft_bbox_target: Tensor, num_pos: int):
         """Calculate the loss of a single scale level based on the features
         extracted by the detection head.
 
@@ -192,6 +192,7 @@ class LDHeadMod(GFLHead):
 
             # ld loss
             if self.loss_ld_avg_mode == "weighted_sum":
+                # delay divied by sum of weight_targets
                 loss_ld = self.loss_ld(
                     pred_corners,
                     soft_corners,
@@ -209,6 +210,7 @@ class LDHeadMod(GFLHead):
 
             ld_train_info = self.loss_ld.train_info
 
+            # cls_kd loss
             if hasattr(self, "loss_cls_kd"):
                 # for fg objects:
                 loss_cls_kd = self.loss_cls_kd(
@@ -231,7 +233,7 @@ class LDHeadMod(GFLHead):
         loss_cls = self.loss_cls(
             cls_score, (labels, score),
             weight=label_weights,
-            avg_factor=avg_factor)
+            avg_factor=num_pos)
 
         # TODO: add dIoU-based vlr support:
 
@@ -284,44 +286,45 @@ class LDHeadMod(GFLHead):
             batch_gt_instances_ignore=batch_gt_instances_ignore)
 
         (anchor_list, labels_list, label_weights_list, bbox_targets_list,
-         bbox_weights_list, avg_factor) = cls_reg_targets
-        # here avg_factor = #number of positive samples
+         bbox_weights_list, num_pos) = cls_reg_targets
+        # here gfl use PseudoSampler, and
+        # avg_factor = #number of positive samples
 
-        avg_factor = reduce_mean(
-            torch.tensor(avg_factor, dtype=torch.float, device=device)).item()
+        num_pos = reduce_mean(
+            torch.tensor(num_pos, dtype=torch.float, device=device)).item()
 
-        (losses_cls, losses_bbox, losses_dfl, losses_cls_kd, losses_ld, ld_train_infos,
-            avg_factor) = multi_apply(
-                self.loss_by_feat_single,
-                anchor_list,
-                cls_scores,
-                bbox_preds,
-                labels_list,
-                label_weights_list,
-                bbox_targets_list,
-                self.prior_generator.strides,
-                soft_cls_targets,
-                soft_bbox_targets,
-                avg_factor=avg_factor)
+        (losses_cls, losses_bbox, losses_dfl, losses_cls_kd,
+         losses_ld, ld_train_infos, weight_sums) = multi_apply(
+            self.loss_by_feat_single,
+            anchor_list,
+            cls_scores,
+            bbox_preds,
+            labels_list,
+            label_weights_list,
+            bbox_targets_list,
+            self.prior_generator.strides,
+            soft_cls_targets,
+            soft_bbox_targets,
+            num_pos=num_pos)
 
         # Note: above losses_bbox|dfl|ld use weighted sum.
         # To make the weight across batch-level on DDP,
         # use reduced sum of weights: avg_factor
-        avg_factor = sum(avg_factor)
+        weight_sum = sum(weight_sums)
         # align with new official GFLHead (#4978)
-        avg_factor = reduce_mean(avg_factor).clamp_(min=1).item()
+        weight_sum = reduce_mean(weight_sum).clamp_(min=1).item()
         # Caution: every FPN layer must have same number of samples,
-        # Otherwise sum(avg_factor) will be wrong
+        # Otherwise using sum(avg_factor) will be wrong
 
-        losses_bbox = [x / avg_factor for x in losses_bbox]
-        losses_dfl = [x / avg_factor for x in losses_dfl]
+        losses_bbox = [x / weight_sum for x in losses_bbox]
+        losses_dfl = [x / weight_sum for x in losses_dfl]
 
-        # Note: losses_ld is intended not being divided by avg_factor in ori impl 
+        # Note: losses_ld is intended not being divided by avg_factor in ori impl
         # for better performance (by increased kd impact during traing).
         # Here we do not follow this impl for simplicity.
-        losses_cls_kd = [x / avg_factor for x in losses_cls_kd]
-        if type(self.loss_ld).__name__ != "KnowledgeDistillationDISTLoss":
-            losses_ld = [x / avg_factor for x in losses_ld]
+        if (self.loss_ld_avg_mode == "weighted_sum" and
+                type(self.loss_ld).__name__ != "KnowledgeDistillationDISTLoss"):
+            losses_ld = [x / weight_sum for x in losses_ld]
 
         # Average ld_train_infos:
         ld_train_info_summary = {}
@@ -333,7 +336,7 @@ class LDHeadMod(GFLHead):
             )
             if (self.loss_ld_avg_mode == "weighted_sum" and
                     type(self.loss_ld).__name__ != "KnowledgeDistillationDISTLoss"):
-                ld_train_info_summary[k] /= avg_factor
+                ld_train_info_summary[k] /= weight_sum
 
         # Then add them to message_hub
         self.record_ld_train_info(ld_train_info_summary)
