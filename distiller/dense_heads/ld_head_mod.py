@@ -366,7 +366,7 @@ class LDHeadMod(GFLHead):
             loss_bbox=losses_bbox,
             loss_dfl=losses_dfl,
             loss_ld=losses_ld,
-            losses_cls_kd=losses_cls_kd
+            loss_cls_kd=losses_cls_kd
         )
 
         return losses_dict
