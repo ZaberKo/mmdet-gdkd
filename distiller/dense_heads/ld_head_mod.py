@@ -219,15 +219,15 @@ class LDHeadMod(GFLHead):
                     target_corners,
                     weight=weight_targets[:, None].expand(-1, 4).reshape(-1),
                     avg_factor=4.0)
-                ld_train_info = {k: v*4.0
-                                 for k, v in self.loss_ld.train_info.items()}
+                ld_train_info = self.loss_ld.train_info
             elif self.loss_ld_avg_mode == "mean":
                 loss_ld = self.loss_ld(
                     pred_corners,
                     soft_corners,
                     target_corners
                 )/4.0
-                ld_train_info = self.loss_ld.train_info
+                ld_train_info = {k: v/4.0
+                                 for k, v in self.loss_ld.train_info.items()}
 
             else:
                 raise NotImplementedError
@@ -365,18 +365,16 @@ class LDHeadMod(GFLHead):
             loss_cls=losses_cls,
             loss_bbox=losses_bbox,
             loss_dfl=losses_dfl,
-            loss_ld=losses_ld)
-
-        if hasattr(self, "loss_cls_kd"):
-            losses_dict["loss_cls_kd"] = losses_cls_kd
+            loss_ld=losses_ld,
+            losses_cls_kd=losses_cls_kd
+        )
 
         return losses_dict
 
     def record_ld_train_info(self, train_info):
         message_hub = MessageHub.get_current_instance()
 
-        _train_info = {}
-        for k, v in train_info.items():
-            _train_info[f"train/ld/{k}"] = v
-
-        message_hub.update_scalars(_train_info)
+        message_hub.update_scalars({
+            f"train/ld/{k}": v
+            for k, v in train_info.items()
+        })
