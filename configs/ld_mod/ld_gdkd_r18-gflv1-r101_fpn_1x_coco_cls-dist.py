@@ -13,6 +13,7 @@ model = dict(
             type='KnowledgeDistillationDISTLoss',
             loss_weight=0.5,
             beta=1.0,
+            gamma=1.0,
             T=2)
     )
 )
