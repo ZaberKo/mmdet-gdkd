@@ -239,7 +239,8 @@ class LDHeadMod(GFLHead):
                     cls_score[pos_inds],
                     soft_cls_target[pos_inds],
                     # should be all 1 in default
-                    weight=label_weights[pos_inds]
+                    # Note: when use DIST, weight will be ignored
+                    weight=label_weights[pos_inds],
                 )
             else:
                 loss_cls_kd = cls_score.sum() * 0
