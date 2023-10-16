@@ -3,16 +3,26 @@ from typing import List, Tuple
 
 import torch
 from torch import Tensor
+import torch.distributed as dist
 
 from mmdet.registry import MODELS
 from mmdet.structures import SampleList
 from mmdet.structures.bbox import bbox_overlaps
-from mmdet.utils import ConfigType, InstanceList, OptInstanceList, reduce_mean
+from mmdet.utils import ConfigType, InstanceList, OptInstanceList
 from mmdet.models.utils import multi_apply, unpack_gt_instances
 from mmdet.models.dense_heads import GFLHead
 from mmengine import MessageHub
 
 from ..loss import DistillLoss
+
+
+def reduce_sum(tensor):
+    """"Obtain the mean of tensor on different GPUs."""
+    if not (dist.is_available() and dist.is_initialized()):
+        return tensor
+    tensor = tensor.clone()
+    dist.all_reduce(tensor.div_(dist.get_world_size()), op=dist.ReduceOp.SUM)
+    return tensor
 
 
 @MODELS.register_module()
@@ -38,12 +48,16 @@ class LDHeadMod(GFLHead):
                      type='KnowledgeDistillationKDLoss',
                      loss_weight=0.25,
                      T=10),
-                 loss_ld_avg_mode: str = "weighted_sum",  # "weighted_sum" or "mean"
+                 # "weighted_sum" or "weighted_sum_nonorm" or "mean"
+                 loss_ld_avg_mode: str = "weighted_sum",
                  loss_cls_kd: ConfigType = None,  # default disabled cls_kd
                  **kwargs) -> dict:
 
         super().__init__(
             num_classes=num_classes, in_channels=in_channels, **kwargs)
+
+        assert loss_ld_avg_mode in [
+            "weighted_sum", 'weighted_sum_nonorm', "mean"],  "unsupported loss_ld_avg_mode"
 
         self.loss_ld_avg_mode = loss_ld_avg_mode
         self.loss_ld = MODELS.build(loss_ld)
@@ -128,16 +142,16 @@ class LDHeadMod(GFLHead):
         # [B, 4]
         anchors = anchors.reshape(-1, 4)
         # [B, num_classes-1] only include fg cls_score
-        cls_score = cls_score.permute(0, 2, 3,
-                                      1).reshape(-1, self.cls_out_channels)
-        soft_cls_target = soft_cls_target.permute(0, 2, 3,
-                                                  1).reshape(-1, self.cls_out_channels)
+        # B=B*H*W
+        cls_score = cls_score.permute(0, 2, 3, 1).reshape(
+            -1, self.cls_out_channels)
+        soft_cls_target = soft_cls_target.permute(0, 2, 3, 1).reshape(
+            -1, self.cls_out_channels)
         # [B, (reg_max+1)*4]
-        bbox_pred = bbox_pred.permute(0, 2, 3,
-                                      1).reshape(-1, 4 * (self.reg_max + 1))
-        soft_bbox_target = soft_bbox_target.permute(0, 2, 3,
-                                                    1).reshape(-1,
-                                                               4 * (self.reg_max + 1))
+        bbox_pred = bbox_pred.permute(0, 2, 3, 1).reshape(
+            -1, 4 * (self.reg_max + 1))
+        soft_bbox_target = soft_bbox_target.permute(0, 2, 3, 1).reshape(
+            -1, 4 * (self.reg_max + 1))
 
         bbox_target = bbox_target.reshape(-1, 4)
         labels = labels.reshape(-1)
@@ -147,31 +161,37 @@ class LDHeadMod(GFLHead):
         bg_class_ind = self.num_classes
         pos_inds = ((labels >= 0)
                     & (labels < bg_class_ind)).nonzero().squeeze(1)
+
+        # score is the normal IoU
         score = label_weights.new_zeros(labels.shape)
 
         if len(pos_inds) > 0:
             pos_bbox_targets = bbox_target[pos_inds]
             pos_bbox_pred = bbox_pred[pos_inds]
             pos_anchors = anchors[pos_inds]
+            # [B_p,2]
             pos_anchor_centers = self.anchor_center(pos_anchors) / stride[0]
 
+            # [B_p], maximum sigmoid pred score of each prediction
             weight_targets = cls_score.detach().sigmoid()
             weight_targets = weight_targets.max(dim=1)[0][pos_inds]
+
             pos_bbox_pred_corners = self.integral(pos_bbox_pred)
             pos_decode_bbox_pred = self.bbox_coder.decode(
                 pos_anchor_centers, pos_bbox_pred_corners)
             pos_decode_bbox_targets = pos_bbox_targets / stride[0]
+
             score[pos_inds] = bbox_overlaps(
                 pos_decode_bbox_pred.detach(),
                 pos_decode_bbox_targets,
                 is_aligned=True)
 
-            # pred_corners, soft_corners [B_p*4, reg_max+1]
+            # pred_corners, soft_corners: [B_p*4, reg_max+1]
             pred_corners = pos_bbox_pred.reshape(-1, self.reg_max + 1)
             pos_soft_targets = soft_bbox_target[pos_inds]
             soft_corners = pos_soft_targets.reshape(-1, self.reg_max + 1)
 
-            # target_corners [B_p*4]
+            # target_corners: [B_p*4]
             target_corners = self.bbox_coder.encode(pos_anchor_centers,
                                                     pos_decode_bbox_targets,
                                                     self.reg_max).reshape(-1)
@@ -191,7 +211,7 @@ class LDHeadMod(GFLHead):
                 avg_factor=4.0)
 
             # ld loss
-            if self.loss_ld_avg_mode == "weighted_sum":
+            if self.loss_ld_avg_mode in ["weighted_sum", 'weighted_sum_nonorm']:
                 # delay divied by sum of weight_targets
                 loss_ld = self.loss_ld(
                     pred_corners,
@@ -199,16 +219,18 @@ class LDHeadMod(GFLHead):
                     target_corners,
                     weight=weight_targets[:, None].expand(-1, 4).reshape(-1),
                     avg_factor=4.0)
+                ld_train_info = {k: v*4.0
+                                 for k, v in self.loss_ld.train_info.items()}
             elif self.loss_ld_avg_mode == "mean":
                 loss_ld = self.loss_ld(
                     pred_corners,
                     soft_corners,
                     target_corners
-                )
-            else:
-                NotImplementedError
+                )/4.0
+                ld_train_info = self.loss_ld.train_info
 
-            ld_train_info = self.loss_ld.train_info
+            else:
+                raise NotImplementedError
 
             # cls_kd loss
             if hasattr(self, "loss_cls_kd"):
@@ -216,6 +238,7 @@ class LDHeadMod(GFLHead):
                 loss_cls_kd = self.loss_cls_kd(
                     cls_score[pos_inds],
                     soft_cls_target[pos_inds],
+                    # should be all 1 in default
                     weight=label_weights[pos_inds]
                 )
             else:
@@ -226,7 +249,7 @@ class LDHeadMod(GFLHead):
             loss_dfl = bbox_pred.sum() * 0
             loss_ld = bbox_pred.sum() * 0
             loss_cls_kd = cls_score.sum() * 0
-            weight_targets = bbox_pred.sum() * 0
+            weight_targets = bbox_pred.new_tensor(0)
             ld_train_info = {}
 
         # cls (qfl) loss
@@ -278,19 +301,16 @@ class LDHeadMod(GFLHead):
         anchor_list, valid_flag_list = self.get_anchors(
             featmap_sizes, batch_img_metas, device=device)
 
-        cls_reg_targets = self.get_targets(
+        (anchor_list, labels_list, label_weights_list, bbox_targets_list,
+         bbox_weights_list, num_pos) = self.get_targets(
             anchor_list,
             valid_flag_list,
             batch_gt_instances,
             batch_img_metas,
             batch_gt_instances_ignore=batch_gt_instances_ignore)
+        # here gfl use PseudoSampler, and avg_factor = #number of positive samples
 
-        (anchor_list, labels_list, label_weights_list, bbox_targets_list,
-         bbox_weights_list, num_pos) = cls_reg_targets
-        # here gfl use PseudoSampler, and
-        # avg_factor = #number of positive samples
-
-        num_pos = reduce_mean(
+        num_pos = reduce_sum(
             torch.tensor(num_pos, dtype=torch.float, device=device)).item()
 
         (losses_cls, losses_bbox, losses_dfl, losses_cls_kd,
@@ -312,7 +332,7 @@ class LDHeadMod(GFLHead):
         # use reduced sum of weights: avg_factor
         weight_sum = sum(weight_sums)
         # align with new official GFLHead (#4978)
-        weight_sum = reduce_mean(weight_sum).clamp_(min=1).item()
+        weight_sum = reduce_sum(weight_sum).clamp(min=1).item()
         # Caution: every FPN layer must have same number of samples,
         # Otherwise using sum(avg_factor) will be wrong
 
