@@ -3,6 +3,7 @@ import argparse
 import logging
 import os
 import os.path as osp
+import time
 
 import torch
 
@@ -77,10 +78,28 @@ def main():
     for config_file in args.config[1:]:
         _cfg = Config.fromfile(config_file)
         cfg.merge_from_dict(_cfg)
-    
+
     cfg.launcher = args.launcher
     if args.cfg_options is not None:
         cfg.merge_from_dict(args.cfg_options)
+
+    suffix_list = []
+
+    if args.cfg_options is not None:
+        opt_ld_pattern = "model.bbox_head.loss_ld."
+        opt_cls_kd_pattern = "model.bbox_head.loss_cls_kd."
+        for k, v in args.cfg_options.items():
+            if opt_ld_pattern in k:
+                suffix_list.append(f"ld.{k[len(opt_ld_pattern):]}={v}")
+            elif opt_cls_kd_pattern in k:
+                suffix_list.append(
+                    f"cls_kd.{k[len(opt_cls_kd_pattern):]}={v}")
+        # suffix_list = [f"{k}={v}" for k, v in args.cfg_options.items()] + suffix_list
+
+    if args.wandb_suffix is not None:
+        suffix_list.append(args.wandb_suffix)
+
+    suffix_str = ",".join(suffix_list)
 
     # work_dir is determined in this priority: CLI > segment in file > filename
     if args.work_dir is not None:
@@ -88,8 +107,14 @@ def main():
         cfg.work_dir = args.work_dir
     elif cfg.get('work_dir', None) is None:
         # use config filename as default work_dir if cfg.work_dir is None
-        cfg.work_dir = osp.join('./work_dirs',
-                                osp.splitext(osp.basename(args.config[0]))[0])
+        exp_name=osp.splitext(osp.basename(args.config[0]))[0]
+        if len(suffix_str) > 0:
+            exp_name = f"{exp_name}_{suffix_str}"
+        cfg.work_dir = osp.join(
+            './work_dirs',
+            exp_name,
+            time.strftime('%Y%m%d_%H%M%S', time.localtime(time.time()))
+        )
 
     # enable automatic-mixed-precision training
     if args.amp is True:
@@ -132,25 +157,8 @@ def main():
         torch.hub.set_dir(args.model_home)
 
     if hasattr(cfg, "wandb_backend"):
-        suffix_list = []
 
-        
-        if args.cfg_options is not None:
-            opt_ld_pattern = "model.bbox_head.loss_ld."
-            opt_cls_kd_pattern = "model.bbox_head.loss_cls_kd."
-            for k, v in args.cfg_options.items():
-                if opt_ld_pattern in k:
-                    suffix_list.append(f"ld.{k[len(opt_ld_pattern):]}={v}")
-                elif opt_cls_kd_pattern in k:
-                    suffix_list.append(f"cls_kd.{k[len(opt_cls_kd_pattern):]}={v}")
-            # suffix_list = [f"{k}={v}" for k, v in args.cfg_options.items()] + suffix_list
-        
-        if args.wandb_suffix is not None:
-            suffix_list.append(args.wandb_suffix)
-
-
-        suffix_str = ",".join(suffix_list)
-        if len(suffix_str)>0:
+        if len(suffix_str) > 0:
             wandb_name = f"{cfg.wandb_backend.init_kwargs.name}|{suffix_str}"
 
             cfg.wandb_backend.init_kwargs.update(
@@ -160,7 +168,7 @@ def main():
                 )
             )
             cfg.vis_backends[1] = cfg.wandb_backend
-            cfg.visualizer.vis_backends=cfg.vis_backends
+            cfg.visualizer.vis_backends = cfg.vis_backends
 
     # build the runner from config
     if 'runner_type' not in cfg:
