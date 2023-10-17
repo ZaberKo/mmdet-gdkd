@@ -133,11 +133,20 @@ def main():
 
     if hasattr(cfg, "wandb_backend"):
         suffix_list = []
-        if args.wandb_suffix is not None:
-            suffix_list.append(args.wandb_suffix)
+
         
         if args.cfg_options is not None:
-            suffix_list = [f"{k}={v}" for k, v in args.cfg_options.items()] + suffix_list
+            opt_ld_pattern = "model.bbox_head.loss_ld."
+            opt_cls_kd_pattern = "model.bbox_head.loss_cls_kd."
+            for k, v in args.cfg_options.items():
+                if opt_ld_pattern in k:
+                    suffix_list.append(f"ld.{k[len(opt_ld_pattern):]}={v}")
+                elif opt_cls_kd_pattern in k:
+                    suffix_list.append(f"cls_kd.{k[len(opt_cls_kd_pattern):]}={v}")
+            # suffix_list = [f"{k}={v}" for k, v in args.cfg_options.items()] + suffix_list
+        
+        if args.wandb_suffix is not None:
+            suffix_list.append(args.wandb_suffix)
 
 
         suffix_str = ",".join(suffix_list)
