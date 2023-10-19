@@ -10,7 +10,7 @@ _base_.wandb_backend.init_kwargs.update(
     dict(
         name='{{fileBasenameNoExtension}}',
         group='{{fileBasenameNoExtension}}_group',
-        tags=['ld', 'kd', 'r34-gflv1-r101', 'fpn', '1x', 'coco', 'ld-mean']
+        tags=['ld', 'kd', 'r34-gflv1-r101', 'fpn', '1x', 'coco', 'ld-nonorm']
     )
 )
 
