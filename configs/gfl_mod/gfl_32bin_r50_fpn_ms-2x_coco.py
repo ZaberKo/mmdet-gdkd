@@ -1,6 +1,6 @@
-_base_ = ['./gfl_32bin_r50_fpn_1x_coco.py', '../_base_/wandb_log.py']
-max_epochs = 24
+_base_ = './gfl_32bin_r50_fpn_1x_coco.py'
 
+max_epochs = 24
 # learning policy
 param_scheduler = [
     dict(
