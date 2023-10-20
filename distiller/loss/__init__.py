@@ -4,3 +4,5 @@ from .dkd import KnowledgeDistillationDKDLoss, knowledge_distillation_dkd_loss
 from .gdkd import KnowledgeDistillationGDKDLoss, knowledge_distillation_gdkd_loss
 from .dist import KnowledgeDistillationDISTLoss, knowledge_distillation_dist_loss
 from .distmod import KnowledgeDistillationDISTModLoss, knowledge_distillation_distmod_loss
+
+from .gfocal_loss_mod import DistributionFocalLossMod, distribution_focal_loss_mod

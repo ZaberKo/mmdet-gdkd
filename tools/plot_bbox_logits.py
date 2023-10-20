@@ -26,7 +26,7 @@ def plot_bbox_logits(bbox_logits_list, T=1):
     plt.show()
 
 
-plot_bbox_logits(data0['bboxes_logits'][:5],T=4)
+plot_bbox_logits(data0['bboxes_logits'][:5],T=1)
 # %%
 from analysis_tools.analyze_results import ResultVisualizer
 

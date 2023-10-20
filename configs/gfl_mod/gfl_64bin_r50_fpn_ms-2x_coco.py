@@ -1,4 +1,4 @@
-_base_ = ['./gfl_32bin_r101-dconv-c3-c5_fpn_ms-2x_coco.py', '../_base_/wandb_log.py']
+_base_ = ['./gfl_32bin_r50_fpn_ms-2x_coco.py', '../_base_/wandb_log.py']
 
 model = dict(
     bbox_head=dict(
@@ -9,7 +9,7 @@ _base_.wandb_backend.init_kwargs.update(
     dict(
         name='{{fileBasenameNoExtension}}',
         group='{{fileBasenameNoExtension}}_group',
-        tags=['gfl', '64bin', 'r101', 'dconv-c3-c5', 'fpn', "ms", '2x', 'coco']
+        tags=['gfl', '64bin', 'r50', 'fpn', '1x', 'coco']
     )
 )
 

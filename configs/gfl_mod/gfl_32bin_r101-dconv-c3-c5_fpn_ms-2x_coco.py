@@ -1,9 +1,19 @@
-_base_ = ['../gfl/gfl_r101-dconv-c3-c5_fpn_ms-2x_coco.py', '../_base_/wandb_log.py']
+_base_ = ['./gfl_32bin_r50_fpn_ms-2x_coco.py', '../_base_/wandb_log.py']
+
 model = dict(
-    bbox_head=dict(
-        type='GFLHead',
-        reg_max=32)
-)
+    backbone=dict(
+        type='ResNet',
+        depth=101,
+        num_stages=4,
+        out_indices=(0, 1, 2, 3),
+        frozen_stages=1,
+        norm_cfg=dict(type='BN', requires_grad=True),
+        dcn=dict(type='DCN', deform_groups=1, fallback_on_stride=False),
+        stage_with_dcn=(False, True, True, True),
+        norm_eval=True,
+        style='pytorch',
+        init_cfg=dict(type='Pretrained',
+                      checkpoint='torchvision://resnet101')))
 
 _base_.wandb_backend.init_kwargs.update(
     dict(
