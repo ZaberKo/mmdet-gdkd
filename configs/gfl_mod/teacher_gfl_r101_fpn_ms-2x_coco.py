@@ -5,6 +5,6 @@ load_from = 'https://download.openmmlab.com/mmdetection/v2.0/gfl/gfl_r101_fpn_ms
 custom_imports = dict(imports=['distiller.debug_pkg'], allow_failed_imports=False)
 
 model=dict(
-    type = "GFLDebug",
+    type = "GFL",
     bbox_head=dict(type="GFLHeadDebug")
 )
