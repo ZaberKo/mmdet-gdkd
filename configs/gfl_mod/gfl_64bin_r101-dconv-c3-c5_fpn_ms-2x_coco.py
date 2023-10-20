@@ -1,4 +1,4 @@
-_base_ = ['./gfl_32bin_r101-dconv-c3-c5_fpn_ms-2x_coco.py', '../_base_/wandb_log.py']
+_base_ = './gfl_32bin_r101-dconv-c3-c5_fpn_ms-2x_coco.py'
 
 model = dict(
     bbox_head=dict(
