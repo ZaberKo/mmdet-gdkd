@@ -22,9 +22,8 @@ def pearson_correlation(a, b, eps=1e-8):
 
 
 def inter_class_relation(y_s, y_t):
-    n = y_s.shape[0]
-    # [B], and its .mean() is inter_class_relation
-    return n - pearson_correlation(y_s, y_t)
+    # [B], and its .mean() is original inter_class_relation
+    return 1 - pearson_correlation(y_s, y_t)
 
 
 @weighted_distill_loss
