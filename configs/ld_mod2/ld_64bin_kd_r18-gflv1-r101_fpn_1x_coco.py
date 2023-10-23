@@ -1,10 +1,9 @@
 _base_ = './ld_32bin_kd_r18-gflv1-r101_fpn_1x_coco.py'
 
-custom_imports = dict(imports=['distiller'], allow_failed_imports=False)
-
-teacher_ckpt = './models_home/checkpoints/gfl_32bin_r101_fpn_ms-2x_coco.pth'  # noqa
+teacher_ckpt = './models_home/checkpoints/gfl_64bin_r101_fpn_ms-2x_coco.pth'  # noqa
 
 model = dict(
+    teacher_ckpt=teacher_ckpt,
     bbox_head=dict(
         splits=64
     )
