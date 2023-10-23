@@ -1,10 +1,9 @@
-_base_ = '../gfl/gfl_r101_fpn_ms-2x_coco.py'
+_base_ = './gfl_r101_fpn_ms-2x_coco.py'
 
 load_from = 'https://download.openmmlab.com/mmdetection/v2.0/gfl/gfl_r101_fpn_mstrain_2x_coco/gfl_r101_fpn_mstrain_2x_coco_20200629_200126-dd12f847.pth'
 
 custom_imports = dict(imports=['distiller.debug_pkg'], allow_failed_imports=False)
 
 model=dict(
-    type = "GFL",
     bbox_head=dict(type="GFLHeadDebug")
 )

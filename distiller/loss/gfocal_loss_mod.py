@@ -8,7 +8,7 @@ import torch.nn.functional as F
 from mmdet.models.losses.utils import weighted_loss
 from mmdet.registry import MODELS
 
-import torch.distributions as dists
+from torch.distributions.utils import clamp_probs
 
 
 @weighted_loss
@@ -28,10 +28,10 @@ def distribution_focal_loss_mod(pred, target, *, target_scale, bins=None):
     Returns:
         torch.Tensor: Loss tensor with shape (N,).
     """
-
+    num_bins = pred.shape[-1]
     y_label = target_scale * target
     y_left = y_label.long()
-    y_right = y_left+1
+    y_right = torch.clamp(y_left+1, max=num_bins-1)
     weight_left = y_right.float() - y_label
     weight_right = y_label - y_left.float()
     loss = F.cross_entropy(pred, y_left, reduction='none')*weight_left \
@@ -63,10 +63,11 @@ def distribution_focal_loss_mod2(pred, target, *, target_scale, bins, entropy_we
     min_dis, label = dis.min(dim=-1)  # [N]
 
     p = F.softmax(pred, dim=-1)
-    p_dist = dists.categorical()
+    p = clamp_probs(p)
+    # p_dist = dists.categorical(pro)
 
     loss = F.cross_entropy(pred, label, reduce='none') + \
-        entropy_weights * p_dist.entropy()
+        entropy_weights * torch.log(p)*p
 
     return loss
 
@@ -125,12 +126,17 @@ class DistributionFocalLossMod(nn.Module):
 
 @MODELS.register_module()
 class DistributionFocalLossMod2(DistributionFocalLossMod):
+    def __init__(self, reduction='mean', loss_weight=1.0, entropy_weights=1e-5):
+        super(DistributionFocalLossMod2, self).__init__(reduction, loss_weight)
+
+        self.entropy_weights = entropy_weights
+
     def forward(self,
                 pred,
                 target,
                 target_scale=None,
                 bins=None,
-                entropy_weights=1e-5,
+                entropy_weights=None,
                 weight=None,
                 avg_factor=None,
                 reduction_override=None):
@@ -155,9 +161,13 @@ class DistributionFocalLossMod2(DistributionFocalLossMod):
             reduction_override if reduction_override else self.reduction)
         assert bins is not None, "bins must be specified"
 
+        if entropy_weights is None:
+            entropy_weights = self.entropy_weights
+
         loss_cls = self.loss_weight * distribution_focal_loss_mod2(
             pred, target,
-            target_scale=target_scale, bins=bins, entropy_weights=entropy_weights,
+            target_scale=target_scale, bins=bins, 
+            entropy_weights=entropy_weights,
             weight=weight, reduction=reduction, avg_factor=avg_factor
         )
         return loss_cls

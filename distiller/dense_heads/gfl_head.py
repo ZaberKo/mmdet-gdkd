@@ -13,25 +13,31 @@ from mmdet.registry import MODELS, TASK_UTILS
 from mmdet.structures.bbox import bbox_overlaps
 from mmdet.utils import (ConfigType, InstanceList, MultiConfig, OptConfigType,
                          OptInstanceList, reduce_mean)
-from mmdet.models.task_modules.prior_generators import anchor_inside_flags
-from mmdet.models.task_modules.samplers import PseudoSampler
-from mmdet.models.utils import (filter_scores_and_topk, images_to_levels, multi_apply,
-                                unmap)
-from mmdet.models.dense_heads import AnchorHead
+from ..task_modules.prior_generators import anchor_inside_flags
+from ..task_modules.samplers import PseudoSampler
+from ..utils import (filter_scores_and_topk, images_to_levels, multi_apply,
+                     unmap)
+from .anchor_head import AnchorHead
 
-from ..loss import DistributionFocalLossMod
 
 class Integral(nn.Module):
-    def __init__(self, range_max: int = 16, splits: int = None) -> None:
+    """A fixed layer for calculating integral result from distribution.
+
+    This layer calculates the target location by :math: ``sum{P(y_i) * y_i}``,
+    P(y_i) denotes the softmax vector that represents the discrete distribution
+    y_i denotes the discrete set, usually {0, 1, 2, ..., reg_max}
+
+    Args:
+        reg_max (int): The maximal value of the discrete set. Defaults to 16.
+            You may want to reset it according to your new dataset or related
+            settings.
+    """
+
+    def __init__(self, reg_max: int = 16) -> None:
         super().__init__()
-        self.range_max = range_max
-        if splits is None:
-            splits = range_max
-
-        self.num_bins = splits+1
-
+        self.reg_max = reg_max
         self.register_buffer('project',
-                             torch.linspace(0, self.range_max, self.num_bins))
+                             torch.linspace(0, self.reg_max, self.reg_max + 1))
 
     def forward(self, x: Tensor) -> Tensor:
         """Forward feature from the regression head to get integral result of
@@ -45,14 +51,13 @@ class Integral(nn.Module):
             x (Tensor): Integral result of box locations, i.e., distance
                 offsets from the box center in four directions, shape (N, 4).
         """
-        x = x.reshape(-1, self.num_bins)
-        x = F.softmax(x, dim=1)
+        x = F.softmax(x.reshape(-1, self.reg_max + 1), dim=1)
         x = F.linear(x, self.project.type_as(x)).reshape(-1, 4)
         return x
 
 
 @MODELS.register_module()
-class GFLHeadMod(AnchorHead):
+class GFLHead(AnchorHead):
     """Generalized Focal Loss: Learning Qualified and Distributed Bounding
     Boxes for Dense Object Detection.
 
@@ -98,10 +103,9 @@ class GFLHeadMod(AnchorHead):
                  norm_cfg: ConfigType = dict(
                      type='GN', num_groups=32, requires_grad=True),
                  loss_dfl: ConfigType = dict(
-                     type='DistributionFocalLossMod', loss_weight=0.25),
+                     type='DistributionFocalLoss', loss_weight=0.25),
                  bbox_coder: ConfigType = dict(type='DistancePointBBoxCoder'),
-                 range_max: int = 16,
-                 splits: int = 16,
+                 reg_max: int = 16,
                  init_cfg: MultiConfig = dict(
                      type='Normal',
                      layer='Conv2d',
@@ -115,9 +119,7 @@ class GFLHeadMod(AnchorHead):
         self.stacked_convs = stacked_convs
         self.conv_cfg = conv_cfg
         self.norm_cfg = norm_cfg
-        self.range_max = range_max
-        self.splits = splits
-
+        self.reg_max = reg_max
         super().__init__(
             num_classes=num_classes,
             in_channels=in_channels,
@@ -133,11 +135,8 @@ class GFLHeadMod(AnchorHead):
             else:
                 self.sampler = PseudoSampler(context=self)
 
-        self.integral = Integral(self.range_max, self.splits)
+        self.integral = Integral(self.reg_max)
         self.loss_dfl = MODELS.build(loss_dfl)
-        self.target_scale = self.splits/self.range_max
-
-        assert isinstance(self.loss_dfl, DistributionFocalLossMod), "loss_dfl must be subclass of DistributionFocalLossMod"
 
     def _init_layers(self) -> None:
         """Initialize layers of the head."""
@@ -168,7 +167,7 @@ class GFLHeadMod(AnchorHead):
         self.gfl_cls = nn.Conv2d(
             self.feat_channels, self.cls_out_channels, 3, padding=1)
         self.gfl_reg = nn.Conv2d(
-            self.feat_channels, 4 * (self.splits+1), 3, padding=1)
+            self.feat_channels, 4 * (self.reg_max + 1), 3, padding=1)
         self.scales = nn.ModuleList(
             [Scale(1.0) for _ in self.prior_generator.strides])
 
@@ -267,7 +266,7 @@ class GFLHeadMod(AnchorHead):
         cls_score = cls_score.permute(0, 2, 3,
                                       1).reshape(-1, self.cls_out_channels)
         bbox_pred = bbox_pred.permute(0, 2, 3,
-                                      1).reshape(-1, 4 * (self.splits+1))
+                                      1).reshape(-1, 4 * (self.reg_max + 1))
         bbox_targets = bbox_targets.reshape(-1, 4)
         labels = labels.reshape(-1)
         label_weights = label_weights.reshape(-1)
@@ -294,10 +293,10 @@ class GFLHeadMod(AnchorHead):
                 pos_decode_bbox_pred.detach(),
                 pos_decode_bbox_targets,
                 is_aligned=True)
-            pred_corners = pos_bbox_pred.reshape(-1, (self.splits+1))
+            pred_corners = pos_bbox_pred.reshape(-1, self.reg_max + 1)
             target_corners = self.bbox_coder.encode(pos_anchor_centers,
                                                     pos_decode_bbox_targets,
-                                                    self.range_max).reshape(-1)
+                                                    self.reg_max).reshape(-1)
 
             # regression loss
             loss_bbox = self.loss_bbox(
@@ -310,8 +309,6 @@ class GFLHeadMod(AnchorHead):
             loss_dfl = self.loss_dfl(
                 pred_corners,
                 target_corners,
-                target_scale=self.target_scale,
-                bins=self.integral.project,
                 weight=weight_targets[:, None].expand(-1, 4).reshape(-1),
                 avg_factor=4.0)
         else:
@@ -668,93 +665,3 @@ class GFLHeadMod(AnchorHead):
             int(flags.sum()) for flags in split_inside_flags
         ]
         return num_level_anchors_inside
-
-
-@MODELS.register_module()
-class GFLHeadModDebug(GFLHeadMod):
-    def _predict_by_feat_single(self,
-                                cls_score_list: List[Tensor],
-                                bbox_pred_list: List[Tensor],
-                                score_factor_list: List[Tensor],
-                                mlvl_priors: List[Tensor],
-                                img_meta: dict,
-                                cfg: ConfigDict,
-                                rescale: bool = False,
-                                with_nms: bool = True) -> InstanceData:
-
-        cfg = self.test_cfg if cfg is None else cfg
-        img_shape = img_meta['img_shape']
-        nms_pre = cfg.get('nms_pre', -1)
-
-        mlvl_bboxes = []
-        mlvl_bboxes_logits = []
-        mlvl_scores = []
-        mlvl_labels = []
-        for level_idx, (cls_score, bbox_pred, stride, priors) in enumerate(
-                zip(cls_score_list, bbox_pred_list,
-                    self.prior_generator.strides, mlvl_priors)):
-            assert cls_score.size()[-2:] == bbox_pred.size()[-2:]
-            assert stride[0] == stride[1]
-
-            bbox_pred = bbox_pred.permute(1, 2, 0)
-            bbox_pred_logits = bbox_pred.reshape(-1, 4, self.splits+1)
-            bbox_pred = self.integral(bbox_pred) * stride[0]
-
-            scores = cls_score.permute(1, 2, 0).reshape(
-                -1, self.cls_out_channels).sigmoid()
-
-            # After https://github.com/open-mmlab/mmdetection/pull/6268/,
-            # this operation keeps fewer bboxes under the same `nms_pre`.
-            # There is no difference in performance for most models. If you
-            # find a slight drop in performance, you can set a larger
-            # `nms_pre` than before.
-            results = filter_scores_and_topk(
-                scores, cfg.score_thr, nms_pre,
-                results=dict(bbox_pred=bbox_pred,
-                             priors=priors,
-                             bbox_pre_logits=bbox_pred_logits))
-            scores, labels, keep_idxs, filtered_results = results
-            
-
-            bbox_pred = filtered_results['bbox_pred']
-            priors = filtered_results['priors']
-            bbox_pred_logits = filtered_results['bbox_pre_logits']
-
-            bboxes = self.bbox_coder.decode(
-                self.anchor_center(priors), bbox_pred, max_shape=img_shape)
-            mlvl_bboxes.append(bboxes)
-            mlvl_bboxes_logits.append(bbox_pred_logits)
-            mlvl_scores.append(scores)
-            mlvl_labels.append(labels)
-            
-
-        results = InstanceData()
-        results.bboxes = torch.cat(mlvl_bboxes)
-        results.bboxes_logits = torch.cat(mlvl_bboxes_logits)
-        results.scores = torch.cat(mlvl_scores)
-        results.labels = torch.cat(mlvl_labels)
-
-        return self._bbox_post_process(
-            results=results,
-            cfg=cfg,
-            rescale=rescale,
-            with_nms=with_nms,
-            img_meta=img_meta)
-
-    def _bbox_post_process(self,
-                           results: InstanceData,
-                           cfg: ConfigDict,
-                           rescale: bool = False,
-                           with_nms: bool = True,
-                           img_meta: Optional[dict] = None) -> InstanceData:
-        results = super()._bbox_post_process(results, cfg, rescale, with_nms,img_meta)
-
-        if rescale:
-            assert img_meta.get('scale_factor') is not None
-            scale_factor = [1 / s for s in img_meta['scale_factor']]
-            repeat_num = int(results.bboxes.size(-1) / 2)
-            #TODO: check broadcast
-            scale_factor = results.bboxes_logits.new_tensor(scale_factor).repeat((1, repeat_num)).unsqueeze(-1)
-            results.bboxes_logits = results.bboxes_logits * scale_factor
-
-        return results
